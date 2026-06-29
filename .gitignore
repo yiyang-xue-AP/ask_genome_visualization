@@ -1,0 +1,31 @@
+.venv/
+.venv-run/
+.tools/
+.cache/
+.env
+list/
+
+# Local/generated Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# Frontend dependencies and build output
+node_modules/
+dist/
+build/
+
+# Local data, notes, and archives
+data/
+archive/
+archive_code/
+requirement.md
+.ipynb_checkpoints/
+*.ipynb
+~$*.xlsx
+
+# Misc local files
+*.log
+.DS_Store

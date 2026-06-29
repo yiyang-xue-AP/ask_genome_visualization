@@ -1,0 +1,16 @@
+metric,unit_sign,keep_digit,alias
+spend,$,2,
+activity,,2,
+share of spend,%,1,
+spend share,%,1,
+contribution,%,1,
+source of change,%,1,sourceofchange
+sales,,0,
+gross adds,,0,
+cost per kpi,,0,
+response,,2,
+margin roi,$,2,roi
+cost per activity,$,2,
+cpm,$,2,
+margin,,0,
+contribution to change,,0,

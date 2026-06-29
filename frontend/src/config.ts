@@ -1,0 +1,1 @@
+export { fetchDashboardConfig } from "./apiClient";
