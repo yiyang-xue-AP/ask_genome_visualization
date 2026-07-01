@@ -1,4 +1,4 @@
-"""Core data contracts for the dashboard pipeline."""
+﻿"""Core data contracts for the dashboard pipeline."""
 
 from __future__ import annotations
 
@@ -34,6 +34,7 @@ SortField = Literal[
     "period",
 ]
 SortDirection = Literal["asc", "desc"]
+CategoryMethod = Literal["quantile", "threshold"]
 CalculationOperation = Literal["weighted_roi_by_spend", "growth_rate"]
 FilterOperation = Literal[
     "eq",
@@ -90,6 +91,22 @@ class CalculationSpec(StrictModel):
     also_compute: list[CalculationOperation] = Field(default_factory=list)
 
 
+class CategoryThresholdSpec(StrictModel):
+    label: str = Field(min_length=1)
+    min_value: float | None = None
+    max_value: float | None = None
+    include_min: bool = True
+    include_max: bool = False
+
+
+class CategoryInChartSpec(StrictModel):
+    metric: Metric
+    method: CategoryMethod = "quantile"
+    direction: SortDirection = "desc"
+    labels: list[str] = Field(min_length=1)
+    thresholds: list[CategoryThresholdSpec] = Field(default_factory=list)
+
+
 class FacetSpec(StrictModel):
     enabled: bool
     source_fields: Literal["dropdown_outcome_fields"]
@@ -116,6 +133,7 @@ class ChartSpec(StrictModel):
     data_level: DataLevel
     sorting: SortingSpec | None = None
     calculation: CalculationSpec
+    category_in_chart: CategoryInChartSpec | None = None
     facet: FacetSpec
     axes: AxesSpec
     time_scope: TimeScope
@@ -289,6 +307,15 @@ class FacetData(StrictModel):
     formula_log: str = ""
 
 
+class ChartCategoryData(StrictModel):
+    metric: str
+    method: CategoryMethod
+    direction: SortDirection
+    labels: list[str] = Field(default_factory=list)
+    label_field: str = "category_label"
+    metric_field: str = "category_metric"
+
+
 class ChartData(StrictModel):
     chart_id: str
     chart_title: str = ""
@@ -300,6 +327,7 @@ class ChartData(StrictModel):
     y_axis_fields: list[str]
     left_y_axis_fields: list[str] = Field(default_factory=list)
     right_y_axis_fields: list[str] = Field(default_factory=list)
+    category_in_chart: ChartCategoryData | None = None
     auto_filtered_fields: list[str]
     facets: list[FacetData]
     warnings: list[str] = Field(default_factory=list)

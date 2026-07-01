@@ -1,4 +1,4 @@
-"""DeepSeek-backed chart compiler with hash-diff caching."""
+﻿"""DeepSeek-backed chart compiler with hash-diff caching."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from backend.app.schemas import ChartSpec, RawChartRow
 
 ChartSpecCache = dict[str, dict[str, object]]
 ChartCompiler = Callable[[RawChartRow], ChartSpec]
-COMPILER_CACHE_VERSION = "2026-06-23-axis-role-priority-v2"
+COMPILER_CACHE_VERSION = "2026-06-29-category-in-chart-v1"
 PERSISTENT_CACHE_SCHEMA_VERSION = 1
 
 spec_cache: ChartSpecCache = {}
@@ -212,6 +212,13 @@ def _normalize_llm_chart_spec_payload(payload: dict) -> dict:
                 normalized_axes[axis_field] = []
         normalized["axes"] = normalized_axes
 
+    category = normalized.get("category_in_chart")
+    if isinstance(category, dict):
+        normalized_category = dict(category)
+        if normalized_category.get("thresholds") is None:
+            normalized_category["thresholds"] = []
+        normalized["category_in_chart"] = normalized_category
+
     if normalized.get("validation_warnings") is None:
         normalized["validation_warnings"] = []
 
@@ -249,11 +256,12 @@ def _compiler_system_prompt() -> str:
         "add fields outside the schema and do not write executable chart code. "
         "Use the schema enum values exactly as defined. "
         "Interpret the row by column role, with this priority: explicit Visual Type "
-        "and category-in-chart text define the renderer and axes; Metric defines "
+        "and category-in-chart text define supported renderer hints and value banding; Metric defines "
         "displayed and calculated metrics; Data Level defines portfolio versus tactic "
         "grouping; Analytical Intent defines snapshot versus trend time scope; "
         "Sorting defines sort field and direction; Calculation defines derived "
         "metrics and formulas; narrative columns only populate narrative_instruction. "
+        "Category in chart rules: this column means value banding visual encoding, not a facet, filter, axis, or data field. If the column is blank, NA, none, or absent, set category_in_chart to null. If it asks to segment a metric into named levels such as Excellent, Good, and Fair, populate category_in_chart with metric, labels in best-to-worst order, method quantile when no explicit thresholds are given, and direction desc for metrics where higher is better such as roi, spend, response, and activity. Use direction asc only when the text explicitly says lower values are better. If explicit numeric cutoffs/ranges are given, use method threshold and fill thresholds with label, min_value, max_value, include_min, and include_max. The LLM must not inspect or infer runtime data values and must not assign category labels to rows. "
         "Do not let Chart Description, Chart title, or narrative wording override "
         "explicit Visual Type, category-in-chart, Data Level, Analytical Intent, "
         "Sorting, or Calculation columns. In particular, a word like trend in Chart "
@@ -308,7 +316,7 @@ def _compiler_user_prompt(row: RawChartRow) -> str:
         "contracts from the system prompt. Preserve narrative_instruction from "
         "'Instruction for Summary Narrative' without rewriting it. Generate "
         "chart_title from 'Chart title' and Chart Description. Derive axes from "
-        "Visual Type, category in chart, Metric, and Analytical Intent. Derive "
+        "Visual Type, Metric, and Analytical Intent. Parse category in chart only as optional value banding metadata. Derive "
         "time_scope from Analytical Intent: trend/over-time means trend; snapshot, "
         "comparison, relationship, current/prior, or recent-change analysis means "
         "snapshot unless the row explicitly asks for a time series. Derive "

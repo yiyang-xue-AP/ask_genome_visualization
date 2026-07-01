@@ -1,4 +1,4 @@
-import {
+﻿import {
   Bar,
   CartesianGrid,
   ComposedChart,
@@ -13,14 +13,19 @@ import {
 
 import type { ChartData, FacetData, MetricFormatConfig } from "../../types";
 import { WarningList } from "../ChartRenderer";
+import { CategoryLegend } from "./CategoryEncoding";
 import {
   axisLineProps,
   axisTickProps,
   categoricalAxisProps,
+  categoryColor,
+  categoryLabels,
   displayValue,
   facetTitle,
   formatMetricValue,
+  hasCategoryEncoding,
   isBarMetric,
+  isCategoryEncodedMetric,
   metricColor,
   metricLabel,
   metricValueFormatter,
@@ -111,6 +116,7 @@ function GroupedLineBarFacet({
   const lineMappings = wideData.mappings.filter((mapping) => !isBarMetric(mapping.metric));
   const lineMetrics = chart.y_axis_fields.filter((metric) => !isBarMetric(metric));
   const primaryLegendMetric = barMappings[0]?.metric;
+  const chartHeight = hasCategoryEncoding(chart) ? 238 : 260;
 
   return (
     <section className="facet-panel">
@@ -119,7 +125,7 @@ function GroupedLineBarFacet({
         <div className="empty-state">No data</div>
       ) : (
         <div className="chart-canvas">
-          <ResponsiveContainer width="100%" height={260}>
+          <ResponsiveContainer width="100%" height={chartHeight}>
             <ComposedChart data={wideData.rows} margin={{ bottom: 18, left: 4, right: 4 }}>
               <CartesianGrid stroke="#E5E7EB" />
               <XAxis
@@ -162,6 +168,7 @@ function GroupedLineBarFacet({
               <Tooltip
                 content={
                   <GroupedLineTooltip
+                    chart={chart}
                     mappings={wideData.mappings}
                     metricFormatConfig={metricFormatConfig}
                     xAxisField={xAxisField}
@@ -199,6 +206,7 @@ function GroupedLineBarFacet({
                 component={(props: CustomizedChartProps) => (
                   <GroupedLineOverlay
                     chartProps={props}
+                    chart={chart}
                     leftAxisMetrics={leftAxisMetrics}
                     lineMetrics={lineMetrics}
                     rows={wideData.rows}
@@ -209,6 +217,7 @@ function GroupedLineBarFacet({
               />
             </ComposedChart>
           </ResponsiveContainer>
+          <CategoryLegend chart={chart} />
         </div>
       )}
       {facet.warnings && facet.warnings.length > 0 ? (
@@ -221,12 +230,14 @@ function GroupedLineBarFacet({
 function GroupedLineTooltip({
   active,
   payload,
+  chart,
   mappings,
   metricFormatConfig,
   xAxisField,
 }: {
   active?: boolean;
   payload?: TooltipEntry[];
+  chart: ChartData;
   mappings: SeriesMapping[];
   metricFormatConfig: MetricFormatConfig;
   xAxisField: string;
@@ -253,6 +264,7 @@ function GroupedLineTooltip({
                 row[groupedDataKey(metric, seriesValue)],
                 metricFormatConfig,
               )}
+              {categoryText(chart, row[groupedCategoryKey(metric, seriesValue)])}
             </div>
           ))}
         </div>
@@ -307,6 +319,7 @@ function buildGroupedData(
     for (const metric of metrics) {
       const dataKey = groupedDataKey(metric, seriesValue);
       row[dataKey] = record[metric];
+      row[groupedCategoryKey(metric, seriesValue)] = record.category_label;
     }
   }
 
@@ -330,6 +343,7 @@ function buildGroupedData(
 }
 
 function GroupedLineOverlay({
+  chart,
   chartProps,
   leftAxisMetrics,
   lineMetrics,
@@ -337,6 +351,7 @@ function GroupedLineOverlay({
   seriesValues,
   xAxisField,
 }: {
+  chart: ChartData;
   chartProps: CustomizedChartProps;
   leftAxisMetrics: string[];
   lineMetrics: string[];
@@ -393,17 +408,25 @@ function GroupedLineOverlay({
                   strokeWidth={2}
                 />
               ) : null}
-              {points.map((point) => (
-                <circle
-                  cx={point.x}
-                  cy={point.y}
-                  fill="#FFFFFF"
-                  key={`${metric}-${rowIndex}-${point.seriesIndex}`}
-                  r={3}
-                  stroke={metricColor(metric) ?? "#0F766E"}
-                  strokeWidth={2}
-                />
-              ))}
+              {points.map((point) => {
+                const seriesValue = seriesValues[point.seriesIndex];
+                const categoryLabel = row[groupedCategoryKey(metric, seriesValue)];
+                const fallbackColor = metricColor(metric) ?? "#0F766E";
+                const pointColor = isCategoryEncodedMetric(chart, metric)
+                  ? categoryColor(categoryLabel, categoryLabels(chart), fallbackColor)
+                  : fallbackColor;
+                return (
+                  <circle
+                    cx={point.x}
+                    cy={point.y}
+                    fill={pointColor}
+                    key={`${metric}-${rowIndex}-${point.seriesIndex}`}
+                    r={3}
+                    stroke={metricColor(metric) ?? "#0F766E"}
+                    strokeWidth={1.8}
+                  />
+                );
+              })}
             </g>
           );
         }),
@@ -469,6 +492,17 @@ function numericValue(value: unknown): number | null {
 
 function groupedDataKey(metric: string, seriesValue: string): string {
   return `${metric}__${seriesValue.replace(/[^a-zA-Z0-9]+/g, "_")}`;
+}
+
+function groupedCategoryKey(metric: string, seriesValue: string): string {
+  return `${groupedDataKey(metric, seriesValue)}__category_label`;
+}
+
+function categoryText(chart: ChartData, value: unknown) {
+  if (!hasCategoryEncoding(chart) || value === null || value === undefined || value === "") {
+    return null;
+  }
+  return <span className="tooltip-muted"> ({metricLabel(chart.category_in_chart?.metric ?? "roi")} Level: {String(value)})</span>;
 }
 
 function stringValue(value: unknown): string {

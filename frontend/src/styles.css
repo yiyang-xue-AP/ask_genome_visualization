@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   color: #1f2933;
   background: #f6f7f9;
   font-family:
@@ -338,6 +338,52 @@ input {
   min-width: 0;
 }
 
+
+.category-legend {
+  align-items: center;
+  color: #475569;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.category-legend-item {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.category-legend-swatch {
+  border-radius: 999px;
+  display: inline-block;
+  height: 9px;
+  width: 9px;
+}
+
+.chart-tooltip {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  box-shadow: 0 8px 18px rgb(15 23 42 / 12%);
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 8px 10px;
+}
+
+.chart-tooltip-title {
+  color: #0f172a;
+  font-weight: 750;
+  margin-bottom: 4px;
+}
+
+.tooltip-muted {
+  color: #64748b;
+}
 .segmented-control {
   display: flex;
   gap: 6px;

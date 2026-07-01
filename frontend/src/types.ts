@@ -1,10 +1,19 @@
-export interface FacetData {
+﻿export interface FacetData {
   label: string;
   filters: Record<string, string>;
   series: Record<string, unknown>[];
   calc_result: Record<string, unknown>;
   warnings?: string[];
   formula_log?: string;
+}
+
+export interface CategoryInChartData {
+  metric: string;
+  method: "quantile" | "threshold";
+  direction: "asc" | "desc";
+  labels: string[];
+  label_field: string;
+  metric_field: string;
 }
 
 export interface ChartData {
@@ -18,6 +27,7 @@ export interface ChartData {
   y_axis_fields: string[];
   left_y_axis_fields?: string[];
   right_y_axis_fields?: string[];
+  category_in_chart?: CategoryInChartData | null;
   auto_filtered_fields: string[];
   facets: FacetData[];
   warnings?: string[];

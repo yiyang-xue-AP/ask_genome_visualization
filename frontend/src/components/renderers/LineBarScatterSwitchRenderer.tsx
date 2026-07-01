@@ -1,7 +1,8 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import {
   Bar,
   CartesianGrid,
+  Cell,
   ComposedChart,
   Legend,
   Line,
@@ -16,17 +17,19 @@ import type { TooltipProps } from "recharts";
 
 import type { ChartData, FacetData, MetricFormatConfig } from "../../types";
 import { WarningList } from "../ChartRenderer";
+import { CategoryDot, CategoryLegend, categoryFill } from "./CategoryEncoding";
 import {
   axisLineProps,
   axisTickProps,
   categoricalAxisProps,
+  categoryLabelFromRecord,
   displayValue,
   facetTitle,
   formatMetricValue,
+  hasCategoryEncoding,
   isBarMetric,
   metricColor,
   metricLabel,
-  metricTooltipFormatter,
   metricValueFormatter,
 } from "./renderHelpers";
 
@@ -122,10 +125,11 @@ function ComboView({
   const xAxisField = chart.x_axis_field ?? "activity_group";
   const lineMetrics = chart.y_axis_fields.filter((metric) => !isBarMetric(metric));
   const barMetrics = chart.y_axis_fields.filter(isBarMetric);
+  const chartHeight = hasCategoryEncoding(chart) ? 238 : 260;
 
   return (
     <div className="chart-canvas">
-      <ResponsiveContainer width="100%" height={260}>
+      <ResponsiveContainer width="100%" height={chartHeight}>
         <ComposedChart data={facet.series} margin={{ bottom: 18, left: 4, right: 4 }}>
           <CartesianGrid stroke="#E5E7EB" />
           <XAxis
@@ -165,7 +169,16 @@ function ComboView({
               width={82}
             />
           ) : null}
-          <Tooltip formatter={metricTooltipFormatter(metricFormatConfig)} />
+          <Tooltip
+            content={
+              <MetricCategoryTooltip
+                chart={chart}
+                metricFormatConfig={metricFormatConfig}
+                metrics={chart.y_axis_fields}
+                xAxisField={xAxisField}
+              />
+            }
+          />
           <Legend />
           {barMetrics.map((metric) => (
             <Bar
@@ -175,22 +188,49 @@ function ComboView({
               name={metricLabel(metric)}
               radius={[3, 3, 0, 0]}
               yAxisId="right"
-            />
+            >
+              {hasCategoryEncoding(chart)
+                ? facet.series.map((record, index) => (
+                    <Cell
+                      fill={categoryFill(
+                        chart,
+                        record,
+                        metricColor(metric) ?? "#B45309",
+                        metric,
+                      )}
+                      key={`${metric}-${index}`}
+                    />
+                  ))
+                : null}
+            </Bar>
           ))}
-          {lineMetrics.map((metric) => (
-            <Line
-              dataKey={metric}
-              dot={{ r: 3 }}
-              key={metric}
-              name={metricLabel(metric)}
-              stroke={metricColor(metric) ?? "#0F766E"}
-              strokeWidth={2}
-              type="monotone"
-              yAxisId="left"
-            />
-          ))}
+          {lineMetrics.map((metric) => {
+            const stroke = metricColor(metric) ?? "#0F766E";
+            return (
+              <Line
+                dataKey={metric}
+                dot={(props) => (
+                  <CategoryDot
+                    chart={chart}
+                    cx={Number(props.cx)}
+                    cy={Number(props.cy)}
+                    fallbackStroke={stroke}
+                    payload={props.payload as Record<string, unknown> | undefined}
+                    metric={metric}
+                  />
+                )}
+                key={metric}
+                name={metricLabel(metric)}
+                stroke={stroke}
+                strokeWidth={2}
+                type="monotone"
+                yAxisId="left"
+              />
+            );
+          })}
         </ComposedChart>
       </ResponsiveContainer>
+      <CategoryLegend chart={chart} />
     </div>
   );
 }
@@ -212,10 +252,11 @@ function ScatterView({
     (left, right) =>
       numericValue(left[scatterXAxisKey]) - numericValue(right[scatterXAxisKey]),
   );
+  const chartHeight = hasCategoryEncoding(chart) ? 238 : 260;
 
   return (
     <div className="chart-canvas">
-      <ResponsiveContainer width="100%" height={260}>
+      <ResponsiveContainer width="100%" height={chartHeight}>
         <ScatterChart margin={{ bottom: 18, left: 4, right: 8 }}>
           <CartesianGrid stroke="#E5E7EB" />
           <XAxis
@@ -246,6 +287,7 @@ function ScatterView({
           <Tooltip
             content={
               <ScatterTooltip
+                chart={chart}
                 metricFormatConfig={metricFormatConfig}
                 scatterXAxisKey={scatterXAxisKey}
                 scatterYAxisKey={scatterYAxisKey}
@@ -257,9 +299,56 @@ function ScatterView({
             data={scatterData}
             fill="#7C3AED"
             name={`${metricLabel(scatterYAxisKey)} by ${metricLabel(scatterXAxisKey)}`}
-          />
+          >
+            {hasCategoryEncoding(chart)
+              ? scatterData.map((record, index) => (
+                  <Cell
+                    fill={categoryFill(chart, record, "#7C3AED", scatterYAxisKey)}
+                    key={`scatter-${index}`}
+                  />
+                ))
+              : null}
+          </Scatter>
         </ScatterChart>
       </ResponsiveContainer>
+      <CategoryLegend chart={chart} />
+    </div>
+  );
+}
+
+function MetricCategoryTooltip({
+  active,
+  payload,
+  label,
+  chart,
+  metricFormatConfig,
+  metrics,
+  xAxisField,
+}: TooltipProps<number | string, string> & {
+  chart: ChartData;
+  metricFormatConfig: MetricFormatConfig;
+  metrics: string[];
+  xAxisField: string;
+}) {
+  const row = payload?.[0]?.payload as Record<string, unknown> | undefined;
+  if (!active || !row) {
+    return null;
+  }
+
+  const categoryLabel = categoryLabelFromRecord(chart, row);
+  return (
+    <div className="chart-tooltip">
+      <div className="chart-tooltip-title">
+        {displayValue(row[xAxisField] ?? label)}
+      </div>
+      {categoryLabel ? (
+        <div>{metricLabel(chart.category_in_chart?.metric ?? "roi")} Level: {categoryLabel}</div>
+      ) : null}
+      {uniqueValues(metrics).map((metric) => (
+        <div key={metric}>
+          {metricLabel(metric)}: {formatMetricValue(metric, row[metric], metricFormatConfig)}
+        </div>
+      ))}
     </div>
   );
 }
@@ -267,10 +356,12 @@ function ScatterView({
 function ScatterTooltip({
   active,
   payload,
+  chart,
   metricFormatConfig,
   scatterXAxisKey,
   scatterYAxisKey,
 }: TooltipProps<number, string> & {
+  chart: ChartData;
   metricFormatConfig: MetricFormatConfig;
   scatterXAxisKey: string;
   scatterYAxisKey: string;
@@ -280,13 +371,17 @@ function ScatterTooltip({
   }
 
   const row = payload[0].payload as Record<string, unknown>;
+  const categoryLabel = categoryLabelFromRecord(chart, row);
   return (
     <div className="chart-tooltip">
       <div className="chart-tooltip-title">
         {displayValue(row.activity_group ?? row.tactic ?? row.label)}
       </div>
+      {categoryLabel ? (
+        <div>{metricLabel(chart.category_in_chart?.metric ?? "roi")} Level: {categoryLabel}</div>
+      ) : null}
       <div>
-        {metricLabel(scatterXAxisKey)}:{" "}
+        {metricLabel(scatterXAxisKey)}: {" "}
         {formatMetricValue(
           scatterXAxisKey,
           row[scatterXAxisKey],
@@ -294,7 +389,7 @@ function ScatterTooltip({
         )}
       </div>
       <div>
-        {metricLabel(scatterYAxisKey)}:{" "}
+        {metricLabel(scatterYAxisKey)}: {" "}
         {formatMetricValue(
           scatterYAxisKey,
           row[scatterYAxisKey],
@@ -303,6 +398,16 @@ function ScatterTooltip({
       </div>
     </div>
   );
+}
+
+function uniqueValues(values: string[]): string[] {
+  const unique: string[] = [];
+  for (const value of values) {
+    if (!unique.includes(value)) {
+      unique.push(value);
+    }
+  }
+  return unique;
 }
 
 function numericValue(value: unknown): number {

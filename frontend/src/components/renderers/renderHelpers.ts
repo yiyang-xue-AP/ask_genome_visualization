@@ -1,4 +1,4 @@
-import type { FacetData, MetricFormatConfig } from "../../types";
+﻿import type { ChartData, FacetData, MetricFormatConfig } from "../../types";
 
 export function displayValue(value: unknown): string {
   if (value === null || value === undefined || value === "") {
@@ -81,6 +81,66 @@ export function facetTitle(facet: FacetData): string {
   return facet.label || "all";
 }
 
+const categoryPalette = [
+  "#047857",
+  "#2563EB",
+  "#D97706",
+  "#DC2626",
+  "#7C3AED",
+  "#0891B2",
+  "#475569",
+];
+
+export function hasCategoryEncoding(chart: ChartData): boolean {
+  return Boolean(chart.category_in_chart?.labels?.length);
+}
+
+export function isCategoryEncodedMetric(chart: ChartData, metric: string): boolean {
+  if (!hasCategoryEncoding(chart) || !chart.category_in_chart) {
+    return false;
+  }
+  return metricBase(metric) === chart.category_in_chart.metric;
+}
+
+export function categoryLabels(chart: ChartData): string[] {
+  return chart.category_in_chart?.labels ?? [];
+}
+
+export function categoryLabelField(chart: ChartData): string {
+  return chart.category_in_chart?.label_field ?? "category_label";
+}
+
+export function categoryLabelFromRecord(
+  chart: ChartData,
+  record: Record<string, unknown> | undefined,
+): string | null {
+  if (!record) {
+    return null;
+  }
+  const value = record[categoryLabelField(chart)];
+  return value === null || value === undefined || value === "" ? null : String(value);
+}
+
+export function categoryColor(
+  label: unknown,
+  labels: string[],
+  fallback = "#64748B",
+): string {
+  if (label === null || label === undefined || label === "") {
+    return fallback;
+  }
+  const normalizedLabel = String(label);
+  const index = labels.indexOf(normalizedLabel);
+  if (index < 0) {
+    return fallback;
+  }
+  return categoryPalette[index % categoryPalette.length];
+}
+
+export function categoryLegendItems(chart: ChartData): Array<{ label: string; color: string }> {
+  const labels = categoryLabels(chart);
+  return labels.map((label) => ({ label, color: categoryColor(label, labels) }));
+}
 export function isBarMetric(metric: string): boolean {
   return metric === "spend" || metric === "spend_growth_rate";
 }

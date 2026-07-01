@@ -1,4 +1,4 @@
-"""Runtime tab data pipeline for /api/tab/{tab_num}."""
+﻿"""Runtime tab data pipeline for /api/tab/{tab_num}."""
 
 from __future__ import annotations
 
@@ -58,6 +58,9 @@ _AXIS_FIELD_ALIASES = {
     "time": "time",
     "time_period": "time",
 }
+CATEGORY_LABEL_COLUMN = "category_label"
+CATEGORY_METRIC_COLUMN = "category_metric"
+CATEGORY_RANK_COLUMN = "category_rank"
 
 
 def build_tab_response(
@@ -242,6 +245,7 @@ def _assemble_chart_data(
         y_axis_fields=_display_y_axis_fields(chart_spec),
         left_y_axis_fields=_display_metric_fields(chart_spec, chart_spec.axes.left_y),
         right_y_axis_fields=_display_metric_fields(chart_spec, chart_spec.axes.right_y),
+        category_in_chart=_chart_category_data(chart_spec),
         auto_filtered_fields=tab_filter_result.auto_filtered_fields,
         facets=facets,
         warnings=chart_warnings,
@@ -252,12 +256,13 @@ def _assemble_facet_data(
     chart_spec: ChartSpec,
     facet_result: FacetCalcResult,
 ) -> dict[str, Any]:
-    series = _records_for_series(facet_result.df, chart_spec)
+    df = _add_category_encoding(facet_result.df, chart_spec, facet_result.warnings)
+    series = _records_for_series(df, chart_spec)
     return {
         "label": facet_result.label,
         "filters": facet_result.filters,
         "series": series,
-        "calc_result": _calc_result(facet_result, chart_spec),
+        "calc_result": _calc_result(df, chart_spec),
         "warnings": _unique_warnings(facet_result.warnings),
         "formula_log": facet_result.formula_log,
     }
@@ -305,6 +310,9 @@ def _preferred_series_columns(df: pd.DataFrame, chart_spec: ChartSpec) -> list[s
         chart_spec.axes.x,
         chart_spec.axes.series,
         *metrics,
+        CATEGORY_LABEL_COLUMN,
+        CATEGORY_METRIC_COLUMN,
+        CATEGORY_RANK_COLUMN,
         "growth_rate",
         *(f"{metric}_current" for metric in metrics),
         *(f"{metric}_prior" for metric in metrics),
@@ -319,10 +327,9 @@ def _preferred_series_columns(df: pd.DataFrame, chart_spec: ChartSpec) -> list[s
 
 
 def _calc_result(
-    facet_result: FacetCalcResult,
+    df: pd.DataFrame,
     chart_spec: ChartSpec,
 ) -> dict[str, Any]:
-    df = facet_result.df
     if df.empty:
         return {}
 
@@ -331,6 +338,9 @@ def _calc_result(
         column
         for column in (
             *metrics,
+            CATEGORY_LABEL_COLUMN,
+            CATEGORY_METRIC_COLUMN,
+            CATEGORY_RANK_COLUMN,
             "growth_rate",
             *(f"{metric}_current" for metric in metrics),
             *(f"{metric}_prior" for metric in metrics),
@@ -344,6 +354,126 @@ def _calc_result(
     return {"rows": _json_records(df[_preferred_series_columns(df, chart_spec)])}
 
 
+def _chart_category_data(chart_spec: ChartSpec) -> dict[str, Any] | None:
+    category_spec = chart_spec.category_in_chart
+    if category_spec is None:
+        return None
+
+    return {
+        "metric": category_spec.metric,
+        "method": category_spec.method,
+        "direction": category_spec.direction,
+        "labels": list(category_spec.labels),
+        "label_field": CATEGORY_LABEL_COLUMN,
+        "metric_field": CATEGORY_METRIC_COLUMN,
+    }
+
+
+def _add_category_encoding(
+    df: pd.DataFrame,
+    chart_spec: ChartSpec,
+    warnings: list[str],
+) -> pd.DataFrame:
+    category_spec = chart_spec.category_in_chart
+    if category_spec is None or df.empty:
+        return df.copy()
+
+    result = df.copy()
+    metric_column = _category_metric_column(result, chart_spec)
+    if metric_column is None:
+        warnings.append(
+            f"category_in_chart: metric {category_spec.metric} is not available"
+        )
+        return result
+
+    result[CATEGORY_METRIC_COLUMN] = metric_column
+    result[CATEGORY_LABEL_COLUMN] = None
+    result[CATEGORY_RANK_COLUMN] = None
+
+    if category_spec.method == "threshold" and category_spec.thresholds:
+        return _apply_threshold_categories(result, chart_spec, metric_column)
+
+    return _apply_quantile_categories(result, chart_spec, metric_column)
+
+
+def _category_metric_column(df: pd.DataFrame, chart_spec: ChartSpec) -> str | None:
+    metric = chart_spec.category_in_chart.metric if chart_spec.category_in_chart else None
+    if metric is None:
+        return None
+
+    candidates = [metric, f"{metric}_growth_rate"]
+    for candidate in candidates:
+        if candidate in df.columns:
+            return candidate
+    return None
+
+
+def _apply_quantile_categories(
+    df: pd.DataFrame,
+    chart_spec: ChartSpec,
+    metric_column: str,
+) -> pd.DataFrame:
+    category_spec = chart_spec.category_in_chart
+    if category_spec is None:
+        return df
+
+    labels = list(category_spec.labels)
+    numeric_values = pd.to_numeric(df[metric_column], errors="coerce")
+    valid_values = numeric_values.dropna()
+    if valid_values.empty:
+        return df
+
+    sorted_values = valid_values.sort_values(
+        ascending=category_spec.direction == "asc",
+        kind="mergesort",
+    )
+    denominator = len(sorted_values)
+    bucket_count = len(labels)
+    for rank, index in enumerate(sorted_values.index):
+        bucket_index = min((rank * bucket_count) // denominator, bucket_count - 1)
+        df.at[index, CATEGORY_LABEL_COLUMN] = labels[bucket_index]
+        df.at[index, CATEGORY_RANK_COLUMN] = bucket_index
+
+    return df
+
+
+def _apply_threshold_categories(
+    df: pd.DataFrame,
+    chart_spec: ChartSpec,
+    metric_column: str,
+) -> pd.DataFrame:
+    category_spec = chart_spec.category_in_chart
+    if category_spec is None:
+        return df
+
+    numeric_values = pd.to_numeric(df[metric_column], errors="coerce")
+    for index, value in numeric_values.items():
+        if pd.isna(value):
+            continue
+        for rank, threshold in enumerate(category_spec.thresholds):
+            if _value_matches_threshold(float(value), threshold):
+                df.at[index, CATEGORY_LABEL_COLUMN] = threshold.label
+                df.at[index, CATEGORY_RANK_COLUMN] = rank
+                break
+    return df
+
+
+def _value_matches_threshold(value: float, threshold: Any) -> bool:
+    if threshold.min_value is not None:
+        if threshold.include_min:
+            if value < threshold.min_value:
+                return False
+        elif value <= threshold.min_value:
+            return False
+
+    if threshold.max_value is not None:
+        if threshold.include_max:
+            if value > threshold.max_value:
+                return False
+        elif value >= threshold.max_value:
+            return False
+
+    return True
 def _json_records(df: pd.DataFrame) -> list[dict[str, Any]]:
     return [_json_record(record) for record in df.to_dict("records")]
 

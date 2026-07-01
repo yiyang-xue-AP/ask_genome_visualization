@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import unittest
 
@@ -519,6 +519,66 @@ class TabApiTests(unittest.TestCase):
         self.assertEqual(facet.calc_result["roi"], 1.2)
         self.assertEqual(facet.calc_result["growth_rate"], None)
         self.assertEqual(facet.warnings, ["missing prior period"])
+
+    def test_tab_response_applies_category_in_chart_quantiles(self) -> None:
+        base_spec = make_chart_spec("1.1.2.5", data_level="tactic")
+        payload = base_spec.model_dump()
+        payload.update(
+            {
+                "visual_type": "bar_chart",
+                "axes": {
+                    "x": "activity_group",
+                    "y": ["roi", "spend"],
+                    "left_y": ["roi"],
+                    "right_y": ["spend"],
+                },
+                "category_in_chart": {
+                    "metric": "roi",
+                    "method": "quantile",
+                    "direction": "desc",
+                    "labels": ["Excellent", "Good", "Fair"],
+                    "thresholds": [],
+                },
+            }
+        )
+        chart_spec = ChartSpec.model_validate(payload)
+
+        def fake_calculate(chart_spec, tab_filter_result, dropdown_state):
+            return [
+                FacetCalcResult(
+                    label="uk",
+                    filters={"country": "uk"},
+                    df=pd.DataFrame(
+                        [
+                            {"activity_group": "low", "roi": 1.0, "spend": 30.0},
+                            {"activity_group": "high", "roi": 7.0, "spend": 10.0},
+                            {"activity_group": "mid", "roi": 3.0, "spend": 20.0},
+                        ]
+                    ),
+                    formula_log="weighted_roi_by_spend",
+                )
+            ]
+
+        response = build_tab_response(
+            "1.1",
+            TabRequest(dropdown_state={}),
+            cache={"1.1.2.5": {"hash": "hash-1", "spec": chart_spec}},
+            data_frames={"bi": make_source_df()},
+            calculate_fn=fake_calculate,
+        )
+
+        chart = response.charts[0]
+        facet = chart.facets[0]
+        levels = {
+            row["activity_group"]: row["category_label"]
+            for row in facet.series
+        }
+
+        self.assertEqual(chart.category_in_chart.labels, ["Excellent", "Good", "Fair"])
+        self.assertEqual(levels["high"], "Excellent")
+        self.assertEqual(levels["mid"], "Good")
+        self.assertEqual(levels["low"], "Fair")
+        self.assertEqual(facet.series[0]["category_metric"], "roi")
 
     def test_tab_response_errors_when_tab_has_no_compiled_specs(self) -> None:
         with self.assertRaisesRegex(ValueError, "No compiled ChartSpecs"):

@@ -1,6 +1,7 @@
-import {
+﻿import {
   Bar,
   CartesianGrid,
+  Cell,
   ComposedChart,
   Legend,
   ResponsiveContainer,
@@ -8,17 +9,22 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import type { TooltipProps } from "recharts";
 
 import type { ChartData, FacetData, MetricFormatConfig } from "../../types";
 import { WarningList } from "../ChartRenderer";
+import { CategoryLegend, categoryFill } from "./CategoryEncoding";
 import {
   axisLineProps,
   axisTickProps,
   categoricalAxisProps,
+  categoryLabelFromRecord,
+  displayValue,
   facetTitle,
+  formatMetricValue,
+  hasCategoryEncoding,
   metricColor,
   metricLabel,
-  metricTooltipFormatter,
   metricValueFormatter,
 } from "./renderHelpers";
 
@@ -63,6 +69,7 @@ function BarChartFacet({
     chart.right_y_axis_fields && chart.right_y_axis_fields.length > 0
       ? chart.right_y_axis_fields
       : chart.y_axis_fields.filter((metric) => !leftAxisMetrics.includes(metric));
+  const chartHeight = hasCategoryEncoding(chart) ? 238 : 260;
 
   return (
     <section className="facet-panel">
@@ -71,7 +78,7 @@ function BarChartFacet({
         <div className="empty-state">No data</div>
       ) : (
         <div className="chart-canvas">
-          <ResponsiveContainer width="100%" height={260}>
+          <ResponsiveContainer width="100%" height={chartHeight}>
             <ComposedChart data={facet.series} margin={{ bottom: 18, left: 4, right: 4 }}>
               <CartesianGrid stroke="#E5E7EB" />
               <XAxis
@@ -111,7 +118,16 @@ function BarChartFacet({
                   yAxisId="right"
                 />
               ) : null}
-              <Tooltip formatter={metricTooltipFormatter(metricFormatConfig)} />
+              <Tooltip
+                content={
+                  <MetricCategoryTooltip
+                    chart={chart}
+                    metricFormatConfig={metricFormatConfig}
+                    metrics={chart.y_axis_fields}
+                    xAxisField={xAxisField}
+                  />
+                }
+              />
               <Legend />
               {leftAxisMetrics.map((metric) => (
                 <Bar
@@ -121,7 +137,21 @@ function BarChartFacet({
                   name={metricLabel(metric)}
                   radius={[3, 3, 0, 0]}
                   yAxisId="left"
-                />
+                >
+                  {hasCategoryEncoding(chart)
+                    ? facet.series.map((record, index) => (
+                        <Cell
+                          fill={categoryFill(
+                            chart,
+                            record,
+                            metricColor(metric) ?? "#0F766E",
+                            metric,
+                          )}
+                          key={`${metric}-${index}`}
+                        />
+                      ))
+                    : null}
+                </Bar>
               ))}
               {rightAxisMetrics.map((metric) => (
                 <Bar
@@ -131,10 +161,25 @@ function BarChartFacet({
                   name={metricLabel(metric)}
                   radius={[3, 3, 0, 0]}
                   yAxisId="right"
-                />
+                >
+                  {hasCategoryEncoding(chart)
+                    ? facet.series.map((record, index) => (
+                        <Cell
+                          fill={categoryFill(
+                            chart,
+                            record,
+                            metricColor(metric) ?? "#7C3AED",
+                            metric,
+                          )}
+                          key={`${metric}-${index}`}
+                        />
+                      ))
+                    : null}
+                </Bar>
               ))}
             </ComposedChart>
           </ResponsiveContainer>
+          <CategoryLegend chart={chart} />
         </div>
       )}
       {facet.warnings && facet.warnings.length > 0 ? (
@@ -142,6 +187,53 @@ function BarChartFacet({
       ) : null}
     </section>
   );
+}
+
+function MetricCategoryTooltip({
+  active,
+  payload,
+  label,
+  chart,
+  metricFormatConfig,
+  metrics,
+  xAxisField,
+}: TooltipProps<number | string, string> & {
+  chart: ChartData;
+  metricFormatConfig: MetricFormatConfig;
+  metrics: string[];
+  xAxisField: string;
+}) {
+  const row = payload?.[0]?.payload as Record<string, unknown> | undefined;
+  if (!active || !row) {
+    return null;
+  }
+
+  const categoryLabel = categoryLabelFromRecord(chart, row);
+  return (
+    <div className="chart-tooltip">
+      <div className="chart-tooltip-title">
+        {displayValue(row[xAxisField] ?? label)}
+      </div>
+      {categoryLabel ? (
+        <div>{metricLabel(chart.category_in_chart?.metric ?? "roi")} Level: {categoryLabel}</div>
+      ) : null}
+      {uniqueValues(metrics).map((metric) => (
+        <div key={metric}>
+          {metricLabel(metric)}: {formatMetricValue(metric, row[metric], metricFormatConfig)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function uniqueValues(values: string[]): string[] {
+  const unique: string[] = [];
+  for (const value of values) {
+    if (!unique.includes(value)) {
+      unique.push(value);
+    }
+  }
+  return unique;
 }
 
 function isLeftAxisMetric(metric: string): boolean {
