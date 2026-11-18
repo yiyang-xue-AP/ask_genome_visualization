@@ -1,308 +1,217 @@
-# 项目结构示意图
+# Project Structure
 
-这个项目可以按一条主链路理解：
+The main data flow is:
 
 ```text
 visualgrid.xlsx
   -> RawChartRow
   -> ChartSpec
-  -> filter + calculation
+  -> filter + calculate
   -> ChartData
   -> Recharts renderer
 ```
 
-LLM 只负责两件事：
+The LLM has two responsibilities:
 
-- compile 阶段：把 `visualgrid.xlsx` 的一行 chart 配置翻译成 `ChartSpec`
-- runtime 阶段：基于已经算好的 chart data 生成 insights narrative
+- At compile time, translate each chart configuration row into a validated `ChartSpec`.
+- At runtime, generate insights from already calculated chart data.
 
-数据过滤、计算、排序、ChartData 组装和图表渲染都由确定性代码完成。
+Filtering, calculations, sorting, response assembly, and rendering are implemented in code. See [README.md](README.md) for startup instructions and a brief guide to editing the grid.
 
-## 根目录
+## Repository layout
 
 ```text
 ask_genome_visualization/
-├── visualgrid.xlsx              # dashboard 的主配置来源
-├── requirement.md               # 项目需求和规则说明
-├── PROJECT_STRUCTURE.md         # 当前文件
-├── data/                        # CSV 数据源
-├── backend/                     # FastAPI + pandas + LLM compile/narrative
-├── frontend/                    # React + Recharts
-├── scripts/                     # 辅助脚本
-├── archive/                     # 历史资料/备份
-├── archive_code/                # 历史代码/备份
-└── .cache/                      # runtime cache，自动生成，不进 git
+|-- README.md                    # Startup and grid editing guide
+|-- PROJECT_STRUCTURE.md         # Architecture and implementation map
+|-- visualgrid.xlsx              # Main dashboard configuration
+|-- data/                        # Local CSV sources; excluded from Git
+|-- supporting_files/            # Metric formatting configuration
+|-- backend/                     # FastAPI, pandas, compilation, and insights
+|-- frontend/                    # React, Vite, and Recharts
+|-- scripts/                     # Local startup helpers
+`-- .cache/                      # Generated runtime cache; excluded from Git
 ```
 
-`.cache/chart_specs.json` 是后端 compile 后生成的持久化 ChartSpec cache。它用于跨 session 复用已解析过的 chart spec，删掉也没关系，重新 Compile Grid 会再生成。
+`data/` contains `bi_masking_llm_ready.csv`, `br_masking_llm_ready.csv`, and `total_masking_llm_ready.csv`. Source names map to these files in `backend/app/compile_pipeline.py`.
 
-## 后端结构
+`.cache/chart_specs.json` stores compiled specs across sessions. Cache reuse requires matching row hashes and compiler versions. Deleting the file requires compiling the grid again.
+
+## Backend
 
 ```text
 backend/
-├── app/
-│   ├── main.py                  # FastAPI API 入口
-│   ├── schemas.py               # 核心数据结构：ChartSpec / ChartData / TabResponse
-│   ├── grid_parser.py           # 读取 visualgrid.xlsx
-│   ├── llm_chart_compiler.py    # RawChartRow -> ChartSpec，含 hash cache
-│   ├── compile_pipeline.py      # Compile Grid 主流程
-│   ├── spec_validator.py        # ChartSpec 校验
-│   ├── dashboard_config.py      # 生成前端 dropdown config
-│   ├── tab_configs.py           # Tab 级硬编码规则
-│   ├── tab_pipeline.py          # /api/tab runtime 主流程
-│   ├── filter_engine.py         # dropdown/filter/facet 逻辑
-│   ├── calculation_engine.py    # ROI、spend、growth rate、排序等计算
-│   ├── narrative_generator.py   # insights prompt 和 narrative 生成
-│   ├── deepseek_client.py       # DeepSeek API client
-│   └── period_utils.py          # period 解析、排序、范围筛选
-└── tests/                       # 后端测试
+|-- .env.example                 # DeepSeek key template
+|-- requirements.txt             # Python dependencies
+|-- app/
+|   |-- main.py                  # FastAPI entry point and API routes
+|   |-- schemas.py               # ChartSpec, ChartData, and API contracts
+|   |-- grid_parser.py           # Read Charts and Config workbook sheets
+|   |-- llm_chart_compiler.py    # RawChartRow -> ChartSpec and hash cache
+|   |-- compile_pipeline.py      # Coordinate grid compilation
+|   |-- spec_validator.py        # Validate specs against tab/data requirements
+|   |-- dashboard_config.py      # Build dropdown and formatting configuration
+|   |-- tab_configs.py           # Tab definitions and filter/time rules
+|   |-- tab_pipeline.py          # Assemble runtime tab responses
+|   |-- filter_engine.py         # Dropdown normalization, filtering, and facets
+|   |-- calculation_engine.py    # Metric calculations, growth, and sorting
+|   |-- narrative_generator.py   # Insight prompts and generated narratives
+|   |-- deepseek_client.py       # DeepSeek client and API key lookup
+|   `-- period_utils.py          # Period parsing, ordering, and range selection
+`-- tests/                       # Backend unit and pipeline tests
 ```
 
-## 前端结构
+`ChartSpec` describes how to build a chart: its identity, source, metrics, visual type, grouping level, axes, time scope, calculations, sorting, category bands, facets, and narrative instructions. `ChartData` contains the computed values and display metadata sent to the frontend.
+
+Tab-level rules remain in `tab_configs.py`. Adding chart rows within supported tabs is a grid edit; introducing a new tab or filtering policy also requires updating these rules.
+
+## Frontend
 
 ```text
 frontend/
-├── src/
-│   ├── App.tsx                  # 前端主状态：tab cache、dropdown、narrative async
-│   ├── apiClient.ts             # API 请求封装
-│   ├── config.ts                # 导出 fetchDashboardConfig
-│   ├── types.ts                 # 前端数据类型
-│   ├── layoutEngine.ts          # 按 section/chart_id 组织布局
-│   ├── components/
-│   │   ├── DropdownPanel.tsx    # dropdown UI 和可选组合禁用
-│   │   ├── ChartRenderer.tsx    # 根据 visual_type 选择 renderer
-│   │   └── renderers/
-│   │       ├── CardsRenderer.tsx
-│   │       ├── BarChartRenderer.tsx
-│   │       ├── LineBarRenderer.tsx
-│   │       ├── GroupedLineBarRenderer.tsx
-│   │       ├── LineBarScatterSwitchRenderer.tsx
-│   │       └── renderHelpers.ts
-│   └── styles.css
-└── tests/                       # 前端静态测试
+|-- package.json                 # Dependencies and dev/build scripts
+|-- vite.config.ts               # Vite setup and /api proxy to port 8001
+|-- src/
+|   |-- App.tsx                  # Tab state/cache, dropdowns, and async insights
+|   |-- apiClient.ts             # API requests and timeouts
+|   |-- config.ts                # Re-export fetchDashboardConfig
+|   |-- types.ts                 # Frontend data contracts
+|   |-- layoutEngine.ts          # Group charts by section and chart ID
+|   |-- components/
+|   |   |-- DropdownPanel.tsx    # Filter selection and valid combinations
+|   |   |-- ChartRenderer.tsx    # Select renderer by visual_type
+|   |   `-- renderers/
+|   |       |-- CardsRenderer.tsx
+|   |       |-- BarChartRenderer.tsx
+|   |       |-- LineBarRenderer.tsx
+|   |       |-- GroupedLineBarRenderer.tsx
+|   |       |-- LineBarScatterSwitchRenderer.tsx
+|   |       |-- CategoryEncoding.tsx
+|   |       `-- renderHelpers.ts
+|   `-- styles.css
+`-- tests/                       # Python-based static frontend checks
 ```
 
-## Compile Grid 流程
+## Grid compilation
 
-用户点击前端的 `Compile Grid` 后：
+Clicking **Compile Grid** triggers:
 
 ```text
 POST /api/compile
-  -> backend/app/main.py
+  -> main.py
   -> compile_pipeline.compile_grid()
   -> grid_parser.parse_grid()
-       visualgrid.xlsx Charts sheet -> list[RawChartRow]
+       Charts sheet -> list[RawChartRow]
   -> llm_chart_compiler.compile_chart_specs()
-       row_hash 未变 -> 复用 cache
-       row_hash 变化/新增 -> 调 DeepSeek 生成 ChartSpec
-       grid 删除 -> 删除 cache 中对应 chart
+       Unchanged row + matching compiler version -> reuse cached spec
+       New or changed row -> ask DeepSeek for a ChartSpec
+       Deleted row -> remove its cached spec
+  -> publish spec_cache and save .cache/chart_specs.json
   -> spec_validator.validate_chart_specs()
-  -> 写入内存 spec_cache 和 .cache/chart_specs.json
-  -> 返回 CompileResponse
+  -> CompileResponse
 ```
 
-最重要文件：
+The response includes specs, validation results, and the IDs of recompiled and reused charts. The frontend clears its tab cache and reloads the active tab after compilation. When specs are missing on initial page load, the frontend also attempts compilation automatically.
 
-- `backend/app/compile_pipeline.py`
-- `backend/app/grid_parser.py`
-- `backend/app/llm_chart_compiler.py`
-- `backend/app/spec_validator.py`
+## Dashboard configuration
 
-## 页面加载和 dropdown 配置流程
-
-页面第一次打开时：
+On initial page load:
 
 ```text
 GET /api/dashboard-config
   -> dashboard_config.build_dashboard_config()
-  -> 读取 data CSV
-  -> 推导 metric options
-  -> 推导 period options/defaults
-  -> 推导 outcome field options
-  -> 读取 Config sheet 中的 outcome field alias
-  -> 返回 DashboardConfig
+  -> read source CSV data
+  -> derive metric options, periods/defaults, and outcome-field options
+  -> derive valid outcome-field combinations for each tab
+  -> read display aliases from the workbook's Config sheet
+  -> read units and precision from supporting_files/unit_sign_config.csv
+  -> DashboardConfigResponse
 ```
 
-最重要文件：
+The frontend uses this response to populate dropdowns and select a valid initial state.
 
-- `backend/app/dashboard_config.py`
-- `backend/app/filter_engine.py`
-- `frontend/src/App.tsx`
-- `frontend/src/components/DropdownPanel.tsx`
+## Tab data requests
 
-## Tab 数据请求流程
-
-用户加载 tab 或改变 dropdown 后：
+Loading a tab or confirming dropdown changes triggers:
 
 ```text
 POST /api/tab/{tab_num}
-  -> backend/app/main.py
+  -> main.py refreshes spec_cache from the persistent cache
   -> tab_pipeline.build_tab_response()
-  -> 找到当前 tab 的 ChartSpec
-  -> 读取对应 source data
+  -> select the tab's ChartSpecs and load source data
   -> normalize_dropdown_state()
   -> build_available_outcome_field_options()
   -> filter_tab()
-       tactic_filter
-       auto_filter aggregate fields
-       拆 facet slices
+       Apply tactic filters and aggregate-field rules
+       Split data into facet slices
   -> calculate_chart()
-       time slicing
-       portfolio/tactic groupby
-       weighted ROI
-       growth rate
-       sorting
-  -> assemble ChartData
-  -> 返回 TabResponse
+       Select time periods and group portfolio/tactic data
+       Calculate metrics and growth rates
+       Apply sorting
+  -> assemble ChartData and apply category bands
+  -> TabResponse
 ```
 
-最重要文件：
+The response includes charts, warnings, normalized dropdown state, available outcome-field options, and automatically filtered fields.
 
-- `backend/app/tab_pipeline.py`
-- `backend/app/filter_engine.py`
-- `backend/app/calculation_engine.py`
-- `backend/app/schemas.py`
-
-## 前端渲染流程
-
-前端拿到 `ChartData` 后：
+## Chart rendering
 
 ```text
 App.tsx
-  -> groupChartsBySection()
+  -> layoutEngine.groupChartsBySection()
   -> ChartRenderer
-       visual_type === cards
-       visual_type === bar_chart
-       visual_type === line_bar
-       visual_type === grouped_line_bar
-       visual_type === line_bar_scatter_switch
-  -> 对应 Recharts renderer
+       cards                   -> CardsRenderer
+       bar_chart               -> BarChartRenderer
+       line_bar                -> LineBarRenderer
+       grouped_line_bar        -> GroupedLineBarRenderer
+       line_bar_scatter_switch -> LineBarScatterSwitchRenderer
+  -> Recharts / KPI cards
 ```
 
-`ChartSpec` 里真正影响画图的字段主要是：
+The main spec fields affecting the result are `visual_type`, `metrics`, `axes.x`, `axes.y`, `axes.left_y`, `axes.right_y`, `axes.series`, `data_level`, `time_scope`, `calculation`, `sorting`, `category_in_chart`, and `chart_title`. The backend converts these into the `ChartData` consumed by renderers.
 
-- `visual_type`
-- `metrics`
-- `axes.x`
-- `axes.y`
-- `axes.left_y`
-- `axes.right_y`
-- `axes.series`
-- `data_level`
-- `time_scope`
-- `calculation`
-- `sorting`
-- `chart_title`
+## Insight generation
 
-最重要文件：
-
-- `frontend/src/App.tsx`
-- `frontend/src/layoutEngine.ts`
-- `frontend/src/components/ChartRenderer.tsx`
-- `frontend/src/components/renderers/*`
-
-## Insights narrative 流程
-
-图表数据返回并渲染后，前端异步请求 narrative：
+After chart data loads, the frontend requests insights asynchronously:
 
 ```text
 App.tsx
-  -> fetchNarrative(chart_id, facets)
+  -> apiClient.fetchNarrative(chart_id, facets)
   -> POST /api/narrative/{chart_id}
   -> narrative_generator.generate_narrative()
-       使用 ChartSpec.narrative_instruction
-       使用 FacetData.calc_result
-       使用 FacetData.series
-       使用 formula_log
+       Use ChartSpec.narrative_instruction
+       Include each facet's calc_result, series, and formula_log
   -> DeepSeek
   -> NarrativeResponse
-  -> 写入前端 tabCache[tab_num].narratives[chart_id]
+  -> tabCache[tab_num].narratives[chart_id]
 ```
 
-最重要文件：
+`deepseek_client.py` looks for a non-empty `DEEPSEEK_API_KEY` in the process environment, the root `.env`, then `backend/.env`, in that order.
 
-- `frontend/src/App.tsx`
-- `backend/app/narrative_generator.py`
-- `backend/app/deepseek_client.py`
+## Where to make changes
 
-## 常见修改入口
+| Change | Main files |
+| --- | --- |
+| Add, delete, or tune a supported chart | `visualgrid.xlsx`, then Compile Grid |
+| Change grid parsing or interpretation | `backend/app/grid_parser.py`, `backend/app/llm_chart_compiler.py` |
+| Change ChartSpec contracts | `backend/app/schemas.py`, `backend/app/llm_chart_compiler.py`, `backend/app/spec_validator.py`, `frontend/src/types.ts` |
+| Add tabs or change tab rules | `backend/app/tab_configs.py` |
+| Change dropdown behavior | `backend/app/dashboard_config.py`, `backend/app/filter_engine.py`, `frontend/src/components/DropdownPanel.tsx` |
+| Change calculations or sorting | `backend/app/calculation_engine.py`, `backend/app/tab_pipeline.py` |
+| Add a renderer type | `backend/app/schemas.py`, `backend/app/llm_chart_compiler.py`, `backend/app/tab_pipeline.py`, `frontend/src/types.ts`, `frontend/src/components/ChartRenderer.tsx`, and a renderer in `frontend/src/components/renderers/` |
+| Change metric units or precision | `supporting_files/unit_sign_config.csv` |
+| Change insight style | `backend/app/narrative_generator.py` |
+| Change the DeepSeek model or key lookup | `backend/app/deepseek_client.py` |
 
-如果你要改 grid 怎么被解析：
+## Suggested reading order
 
-```text
-backend/app/grid_parser.py
-backend/app/llm_chart_compiler.py
-```
-
-如果你要改 ChartSpec schema：
-
-```text
-backend/app/schemas.py
-backend/app/llm_chart_compiler.py
-backend/app/spec_validator.py
-frontend/src/types.ts
-```
-
-如果你要改 dropdown：
-
-```text
-backend/app/dashboard_config.py
-backend/app/filter_engine.py
-frontend/src/components/DropdownPanel.tsx
-```
-
-如果你要改数据计算：
-
-```text
-backend/app/calculation_engine.py
-backend/app/tab_pipeline.py
-```
-
-如果你要改 chart 排序：
-
-```text
-backend/app/calculation_engine.py
-```
-
-如果你要加一种新图：
-
-```text
-backend/app/schemas.py            # VisualType enum
-backend/app/llm_chart_compiler.py # prompt 中加入映射规则
-backend/app/tab_pipeline.py       # 如需新 ChartData 字段，在这里组装
-frontend/src/types.ts
-frontend/src/components/ChartRenderer.tsx
-frontend/src/components/renderers/NewRenderer.tsx
-requirement.md
-```
-
-如果你要改 insights 风格：
-
-```text
-backend/app/narrative_generator.py
-```
-
-如果你要改 DeepSeek 模型或 API key 读取：
-
-```text
-backend/app/deepseek_client.py
-```
-
-## 最短阅读路线
-
-如果只想快速看懂项目，按这个顺序读：
-
-```text
-1. requirement.md
-2. backend/app/schemas.py
-3. backend/app/main.py
-4. backend/app/compile_pipeline.py
-5. backend/app/llm_chart_compiler.py
-6. backend/app/tab_pipeline.py
-7. backend/app/filter_engine.py
-8. backend/app/calculation_engine.py
-9. frontend/src/App.tsx
-10. frontend/src/components/ChartRenderer.tsx
-11. frontend/src/components/renderers/*
-```
-
+1. `README.md`
+2. `backend/app/schemas.py`
+3. `backend/app/main.py`
+4. `backend/app/compile_pipeline.py`
+5. `backend/app/llm_chart_compiler.py`
+6. `backend/app/tab_pipeline.py`
+7. `backend/app/filter_engine.py`
+8. `backend/app/calculation_engine.py`
+9. `frontend/src/App.tsx`
+10. `frontend/src/components/ChartRenderer.tsx` and `renderers/`

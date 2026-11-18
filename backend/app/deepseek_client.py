@@ -55,8 +55,10 @@ def _load_deepseek_api_key() -> str:
     if env_value:
         return env_value
 
-    env_path = Path(__file__).resolve().parents[2] / ".env"
-    if env_path.exists():
+    project_root = Path(__file__).resolve().parents[2]
+    for env_path in (project_root / ".env", project_root / "backend" / ".env"):
+        if not env_path.exists():
+            continue
         for line in env_path.read_text(encoding="utf-8").splitlines():
             stripped = line.strip()
             if not stripped or stripped.startswith("#") or "=" not in stripped:
